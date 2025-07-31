@@ -1,0 +1,12 @@
+Int main(Nat n, Real x, Real y, Bool option)(x > n, x * n = y ) //(Nat n, Real x, Real y, Bool option; x > n, x * n = y )
+{
+    Real dif := x - y;
+    if (option)
+    {
+        return dif / n;
+    }
+    else
+    {
+        return diff;
+    }
+}
