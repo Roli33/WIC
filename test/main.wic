@@ -1,0 +1,19 @@
+Int main(Int n, Real x, Real y, Bool option)(x > n, f(x) > y, x * n == y)(dif > -9999)
+{
+    // this is a comment
+    Double dif = x - y;
+    if (option)
+    {
+        return dif / n;
+    }
+    else
+    {
+        return dif;
+    }
+}
+
+Void example(Int x)(x > 10)()
+{
+    x = x + 5;
+    return x;
+}

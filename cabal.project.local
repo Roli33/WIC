@@ -1,0 +1,3 @@
+package z3
+  extra-include-dirs: D:\z3\include
+  extra-lib-dirs: D:\z3\bin

@@ -1,0 +1,6 @@
+cradle:
+  cabal:
+    - path: "exe"
+      component: "exe:WIC"
+    - path: "test"
+      component: "test:wic-tests"

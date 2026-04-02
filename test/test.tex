@@ -1,0 +1,215 @@
+\documentclass[
+    hungarian,
+    parspace
+]{elteikthesis}
+
+\usepackage[utf8]{inputenc}
+\usepackage{minted}
+
+% --- 1. NYELVI BEÁLLÍTÁS (Ez oldja meg a \codelabel hibákat!) ---
+\documentlang{hungarian}
+
+% --- 2. KÖTELEZŐ METAADATOK ---
+% A sortörés (\\) megoldja a túl hosszú cím (Overfull \vbox) problémáját
+\title{Transzpilált nyelv koncepcióigazolása \\ fordítási idejű invariánsokkal} 
+\date{2026} % A védés éve (a sablon ezt várja a \thesisyear helyett)
+
+\author{Hallgató Neve}
+\degree{Programtervező informatikus BSc}
+
+\supervisor{Témavezető Neve}
+\affiliation{Egyetemi docens} % Témavezető beosztása
+
+% --- 3. AZ EGYETEM ÉS KAR ADATAI (Ezek oldják meg a \facname hibát!) ---
+\university{Eötvös Loránd Tudományegyetem}
+\faculty{Informatikai Kar}
+\department{Programozási Nyelvek és Fordítóprogramok Tanszék}
+\city{Budapest}
+
+% Ne felejtsd el az images/elte_cimer_szines.pdf fájlt a mappádban hagyni!
+\logo{images/elte_cimer_szines} 
+% --------------------------------------
+
+\begin{document}
+
+\maketitle
+\tableofcontents
+
+
+% ==========================================
+% 1. BEVEZETÉS ÉS SZAKIRODALOM (Cél: 4-5 oldal)
+% ==========================================
+\chapter{Bevezetés}
+Manapság az informatikának egyre több szektorában jelenik meg az az igény, hogy a kód ne csak hatékony, hanem bizonyíthatóan helyes is legyen. A beágyazott rendszerek, az orvosi szoftverek, vagy a pénzügyi tranzakciókat végző modulok esetében egyetlen szoftverhiba is katasztrofális következményekkel járhat. 
+
+\section{A problémafelvetés}
+Gyakran egyensúlyt kell keresnünk a program hatékonysága és a helyesség ellenőrzése között. Akárhányszor egy függvénynek elő- vagy utófeltételt szeretnénk megfogalmazni és azokat kódban ellenőrizni (például \textit{assert} utasításokkal), valamennyi futásidejű teljesítményt fel kell áldoznunk. Számos szituáció előfordul, ahol egy erősebb heurisztika megfogalmazásával hatékonyabb kódot tudnánk írni, de a futásidejű ellenőrzések lassítják a szoftvert. 
+
+Ennek a problémának megoldásaként merült fel egy olyan imperatív programozási nyelv létrehozása, mely ezeket az elő- és utófeltételeket, invariánsokat ha lehetséges, akkor fordítási időben (compile-time) ellenőrzi. 
+
+\section{Elméleti háttér}
+% TODO: Írj 1-2 oldalt az alábbi témákról a terjedelem növeléséhez!
+Ahhoz, hogy a fordítási idejű invariáns-ellenőrzést megvalósítsuk, több informatikai és matematikai koncepciót is ötvöznünk kell:
+\begin{itemize}
+    \item \textbf{Hoare-logika:} A programok helyességének formális bizonyítására szolgáló rendszer, amely előfeltételekből (preconditions), parancsokból és utófeltételekből (postconditions) áll.
+    \item \textbf{Szimbolikus végrehajtás (Symbolic Execution):} A program nem konkrét értékekkel (pl. $x = 5$), hanem szimbolikus változókkal fut, így a program minden lehetséges végrehajtási útvonala (path) feltérképezhetővé válik.
+    \item \textbf{SMT Megoldók (Z3):} A Satisfiability Modulo Theories (SMT) megoldók képesek bonyolult logikai formulák kielégíthetőségét vizsgálni. Projektünk a Microsoft által fejlesztett Z3 SMT megoldót használja a matematikai és memóriabiztonsági állítások igazolására.
+\end{itemize}
+
+% ==========================================
+% 2. FELHASZNÁLÓI DOKUMENTÁCIÓ (Cél: 5-7 oldal)
+% ==========================================
+\chapter{Felhasználói dokumentáció}
+A szoftver célközönsége elsősorban azon fejlesztők és kutatók csoportja, akik magas megbízhatóságú szoftvereket terveznek, és szeretnék a kódjukban lévő szerződéseket (contracts) fordítási időben verifikálni[cite: 31, 34].
+
+\section{Telepítés és Rendszerkövetelmények}
+A fordítóprogram és az analizátor futtatásához a következő szoftveres környezet szükséges[cite: 35]:
+\begin{itemize}
+    \item \textbf{GHC (Glasgow Haskell Compiler):} A forráskód lefordításához (ajánlott verzió: 9.x).
+    \item \textbf{Cabal vagy Stack:} A Haskell csomagfüggőségek (pl. Megaparsec, Z3) kezeléséhez.
+    \item \textbf{Z3 SMT Solver:} A gazdagépen globálisan telepítve kell lennie a Z3 binárisnak és a C API-nak (pl. Ubuntu alatt \texttt{apt install z3 libz3-dev}).
+\end{itemize}
+
+Az indítás a \texttt{cabal run} paranccsal történik, mely paraméterként várja a bemeneti forrásfájlt[cite: 36].
+
+\section{A nyelv szintaxisa és szemantikája}
+A létrehozott nyelv egy erősen típusos, C-szerű imperatív nyelv. Támogatja az alapvető típusokat (\texttt{Int}, \texttt{Double}, \texttt{Bool}, \texttt{Char}), valamint a mutatókat (\texttt{Ptr}), tömböket (\texttt{Array}), és a komplex adatszerkezeteket (\texttt{struct}, \texttt{union}, \texttt{enum}).
+
+\subsection{Függvények és Szerződések (Contracts)}
+A nyelv legfőbb újítása a függvény-szignatúrákba ágyazott szerződések rendszere. Egy függvény deklarációja az argumentumok után opcionálisan tartalmazhat egy előfeltétel-blokkot és egy utófeltétel-blokkot:
+
+\begin{minted}{c}
+Int divide(Int a, Int b)(b > 0)(res != 0) { 
+    return a / b; 
+}
+\end{minted}
+A fenti kódban a \texttt{(b > 0)} a hívó félre vonatkozó előfeltétel, míg a \texttt{(res != 0)} a függvény által garantált utófeltétel (ahol a \texttt{res} kulcsszó a visszatérési értéket jelöli).
+
+\subsection{Ciklus invariánsok}
+A \texttt{while} ciklusok elemzése szimbolikus úton gyakran végtelen állapottérhez vezet. Ezt a nyelv a ciklusinvariánsok explicit megadásával kezeli:
+\begin{minted}{c}
+while (i < 10) (i >= 0) {
+    i = i + 1;
+}
+\end{minted}
+
+\section{Hibaüzenetek és diagnosztika}
+Amikor a statikus analizátor egy szerződés megsértését vagy egy memóriahibát (pl. tömb alul/túlindexelés) észlel, a fordítás leáll, és a rendszer a következő formátumú diagnosztikai üzenetet adja[cite: 41]:
+\texttt{fájlnév:sor:oszlop - Hiba típusa: Kifejezés}
+
+Például, ha a fenti \texttt{divide} függvényt nullával hívjuk meg:
+\begin{minted}{text}
+test-input:5:5 - Precondition Failed in: divide: y > 0
+\end{minted}
+
+% ==========================================
+% 3. RENDSZERTERV (Cél: 8-10 oldal)
+% ==========================================
+\chapter{Megoldási terv (Rendszerterv)}
+Ez a fejezet bemutatja az alkalmazás architekturális felépítését, az adatfolyamot és a memóriamodellt[cite: 45].
+
+\section{Architektúra és Adatfolyam}
+% TODO: Ide illessz be egy UML Komponens diagramot! [cite: 48, 53]
+A rendszer három fő logikai rétegre bontható[cite: 47]:
+\begin{enumerate}
+    \item \textbf{Lexer és Parser:} Beolvassa a nyers szöveget, ellenőrzi a szintaktikai szabályokat, és felépíti az Absztrakt Szintaxisfát (AST).
+    \item \textbf{Analyzer (Hibrid Állapotgép):} Bejárja az AST-t. Ahol lehetséges, konkrét kiértékelést (Concrete Evaluation) végez, ahol nem (pl. ismeretlen szenzoradatok, függvényparaméterek), ott szimbolikus végrehajtásra tér át.
+    \item \textbf{Z3 SMT Backend:} A szimbolikus formulákat lefordítja a Z3 SMT megoldó nyelvére, és matematikai bizonyításokat végez az invariánsokon és biztonsági szabályokon.
+\end{enumerate}
+
+\section{Az Absztrakt Szintaxisfa (AST) szerkezete}
+A nyelv szintaxisát a \texttt{Parser.hs} modulban definiált ADT-k (Algebraic Data Types) írják le[cite: 50]. 
+
+\begin{minted}{haskell}
+data Expr = Expr SourcePos ExprNode
+\end{minted}
+Minden kifejezés (\texttt{Expr}) egy \texttt{SourcePos} csomagolóval van ellátva. Ez kritikus a pontos hibaüzenetek generálásához az Analizátor fázisban.
+
+A memóriakezelést és a végrehajtás-vezérlést a \texttt{StmtNode} írja le, amely magában foglalja a deklarációkat, értékadásokat, és a vezérlési szerkezeteket (\texttt{If}, \texttt{While}, \texttt{For}).
+
+\section{Memóriamodell és Állapotkezelés}
+A szimbolikus elemző működéséhez elengedhetetlen egy robusztus memóriamodell[cite: 49]. Az állapotot az \texttt{AnalyzerState} rekord fogja össze:
+\begin{itemize}
+    \item \texttt{SymEnv}: A változóneveket memóriacímekre (Addr) képezi le.
+    \item \texttt{Heap}: Konkrét futásidejű értékeket (pl. \texttt{VInt 5}) tárol az adott memóriacímeken.
+    \item \texttt{SymStore}: A szimbolikus végrehajtás során keletkező matematikai kifejezéseket, "képleteket" tárolja.
+    \item \texttt{facts}: A végrehajtási útvonal (Path Condition) során összegyűjtött logikai állítások listája.
+\end{itemize}
+
+% ==========================================
+% 4. MEGVALÓSÍTÁS (Cél: 10-12 oldal)
+% ==========================================
+\chapter{Megvalósítás}
+Ebben a fejezetben a funkcionális programozási paradigma sajátosságait, a monadikus transzformátorokat és az algoritmusok részleteit tekintjük át[cite: 56]. A Haskell nyelv választása lehetővé tette a kód erős strukturáltságát és a magas megbízhatóságot[cite: 61].
+
+\section{A Szintaktikai Elemző (Parser) Implementációja}
+A parser a \texttt{Megaparsec} könyvtárra épül. A kifejezések elemzésére a \texttt{Control.Monad.Combinators.Expr} modul \texttt{makeExprParser} függvényét alkalmaztam, amely lehetővé tette egy precedencia-táblázat (\texttt{operatorTable}) definiálását:
+\begin{minted}{haskell}
+operatorTable :: [[Operator Parser Expr]]
+operatorTable =
+    [ [ prefix "-" (UnOp "-"), prefix "!" (UnOp "!") 
+      , prefix "*" Deref, prefix "&" AddrOf ]
+    , [ binary "*" (BinOp "*"), binary "/" (BinOp "/") ]
+    , [ binary "+" (BinOp "+"), binary "-" (BinOp "-") ]
+    ...
+\end{minted}
+Ez garantálja a C-nyelvi precedenciaszabályok pontos betartását, elkerülve a terjedelmes és nehezen olvasható rekurzív ereszkedő (recursive descent) kód megírását.
+
+\section{A Szimbolikus Végrehajtó Motor (\texttt{symExec})}
+A rendszer "lelke" a \texttt{symExec} algoritmus, amely a szimbolikus kiértékelést végzi. Az elágazások (\texttt{If}) kezelése különösen komplex:
+Amikor a szimbolikus végrehajtó egy elágazáshoz ér, ahol a feltétel értéke fordítási időben nem dönthető el (ismeretlen), a motor \textbf{kettéágazik}. Párhuzamosan kiértékeli a \textit{Then} és az \textit{Else} ágakat. 
+
+A két ág végén a memóriastruktúrák (\texttt{SymStore}) eltérhetnek. Az egyesítést (Merge) egy Ternáris operátor generálásával oldottam meg, amely a feltétel függvényében választja ki a megfelelő értéket (SSA - Static Single Assignment formához hasonlóan).
+
+\section{Biztonsági Ellenőrzések (Safety Extraction)}
+Minden egyes kifejezés kiértékelése előtt lefut az \texttt{extractSafety} függvény, amely implicit előfeltételeket generál[cite: 67]. Például osztás operátor detektálása esetén automatikusan generál egy \texttt{b != 0} ellenőrzést, vagy tömb indexelés esetén a Z3-ba elküldi az alsó és felső indexhatárok ellenőrzését:
+\begin{minted}{haskell}
+(pos, "Array Index Out of Bounds", genExpr (BinOp "<" idx (genExpr (IntLit sz))))
+\end{minted}
+
+\section{Z3 Integráció és a \texttt{proveZ3} függvény}
+Az SMT megoldóval való kommunikáció a \texttt{Z3.Monad} interfészen keresztül történik. A \texttt{translateZ3} függvény az AST-t Z3 sortokká (típusokká) és formulákká konvertálja. A bizonyítás trükkje: nem magát a feltételt akarjuk igazolni (mert az SMT a kielégíthetőséget -- SAT -- vizsgálja), hanem a feltétel \textbf{tagadását} (negation) adjuk a megoldónak. Ha a tagadás \textit{Unsat} (kielégíthetetlen), akkor a tétel bizonyítottan minden lehetséges esetben \textbf{Igaz}.
+
+% ==========================================
+% 5. TESZTELÉS (Cél: 5-8 oldal)
+% ==========================================
+\chapter{Tesztelés}
+A szoftver robusztusságának és helyességének bizonyítása érdekében kiterjedt tesztelési keretrendszert építettem ki a \texttt{Hspec} modul használatával[cite: 70].
+
+\section{Parser Modultesztek}
+A parser tesztelése során feketedoboz tesztelést alkalmaztam. Az elemzett AST fát egy speciális \texttt{clearPos} függvény segítségével megtisztítottam a \texttt{SourcePos} adatoktól, így lehetővé vált a tiszta strukturális összehasonlítás.
+Teszteltem a komplex mutatókonfigurációkat (pl. \texttt{const Int * const p;}), a precedenciaszabályokat, és a negatív teszteket is (olyan kódok, amiknek szintaktikai hibával el kell hasalniuk).
+
+\section{Analizátor és Z3 Tesztesetek}
+Az analizátor tesztelése a legfontosabb, hiszen itt bizonyosodik be a szoftver hozzáadott értéke. A tesztesetek az alábbi kategóriákat fedik le:
+% TODO: Másold be ide a ParserTest.hs "Compile-Time Symbolic Analyzer" részéből a legérdekesebb teszteket (mint kódblokk) és magyarázd el a működésüket hosszan! [cite: 74, 75]
+
+\subsection{Implicit utófeltételek felfedezése}
+A motor képes a "sandbox" végrehajtás segítségével kitalálni a paraméterek módosulásait és a visszatérési értékek összefüggéseit anélkül, hogy a felhasználó ezt külön annotálta volna:
+\begin{minted}{c}
+Int add(Int a, Int b) { return a + b; }
+Void process(Int val, Int x, Int y)(val == x + y) { return; }
+\end{minted}
+A fenti kódban a \texttt{process} függvény sikeresen lefut, mert a fordító automatikusan generált egy \texttt{res == a + b} utófeltételt az \texttt{add} függvényhez.
+
+\subsection{Tömb határellenőrzések (Array Bounds Checking)}
+A rendszer Z3 segítségével bizonyítani tudja az indexek helyességét. Ha az elemző a \texttt{arr[10] = 99;} sort látja egy 5 elemű tömbre, sikeresen dobja a \texttt{Array Index Out of Bounds: 10 < 5} fordítási idejű hibát.
+
+\subsection{Ciklusok feloldása (Bounded Model Checking)}
+A tesztek bizonyítják, hogy a kód képes automatikusan "kigöngyölni" a ciklusokat (loop unrolling). Egy 3 iterációs ciklust explicit invariánsok megadása nélkül is képes matematikailag bizonyítani a rendszer, amely jelentősen növeli a felhasználói élményt és csökkenti a fejlesztőre háruló teher mértékét.
+
+% ==========================================
+% 6. ÖSSZEGZÉS ÉS SZOFTVER FUTTATÁSA (Cél: 2-3 oldal)
+% ==========================================
+\chapter{Összegzés és Értékelés}
+A bemutatott projekt keretében sikeresen elkészült egy olyan koncepcióigazoló (Proof of Concept) compiler technológia, amely egyesíti a hagyományos imperatív nyelvek szintaxisát a formális bizonyító rendszerek erejével.
+
+\section{Szoftver futtatása és Robusztusság}
+A tesztek és a kézi futtatások alapján a program a tervnek megfelelően működik[cite: 79]. Robusztussága kiemelkedő: hibás bemenet, végtelen ciklust eredményező forráskód, vagy ellentmondásos szimbolikus állítások esetén sem omlik össze ("száll el"). Az erőforrásokkal jól gazdálkodik (a \texttt{fuel} alapú limitált szimbolikus fa-bejárás garantálja, hogy a futásidő nem nő exponenciálisan a végtelenségig)[cite: 81, 83].
+
+\section{További fejlesztési lehetőségek}
+A jövőben a nyelv tovább bővíthető dinamikus memóriakezeléssel (pl. \texttt{malloc/free}), amelynek verifikálása a Separation Logic (szeparációs logika) beépítését igényelné. Szintén hasznos lenne egy kódgeneráló (Backend) modul írása, amely a megbízhatónak ítélt AST-t C vagy LLVM IR (Intermediate Representation) kódra fordítaná, így a lefordított program ténylegesen futtathatóvá válna operációs rendszer szinten is.
+
+% TODO: Irodalomjegyzék hozzáadása BibTeX segítségével (Z3 papírok, Megaparsec doksi, Haskell könyvek)! 
+
+\end{document}

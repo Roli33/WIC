@@ -1,0 +1,27 @@
+\select@language {english} \contentsline {chapter}{\numberline {1}Bevezetés}{2}{chapter.1}%
+\select@language {english} \contentsline {section}{\numberline {1.1}A problémafelvetés}{2}{section.1.1}%
+\select@language {english} \contentsline {section}{\numberline {1.2}Elméleti háttér}{2}{section.1.2}%
+\select@language {english} \contentsline {chapter}{\numberline {2}Felhasználói dokumentáció}{4}{chapter.2}%
+\select@language {english} \contentsline {section}{\numberline {2.1}Telepítés és Rendszerkövetelmények}{4}{section.2.1}%
+\select@language {english} \contentsline {section}{\numberline {2.2}A nyelv szintaxisa és szemantikája}{4}{section.2.2}%
+\select@language {english} \contentsline {subsection}{\numberline {2.2.1}Függvények és Szerződések (Contracts)}{5}{subsection.2.2.1}%
+\select@language {english} \contentsline {subsection}{\numberline {2.2.2}Ciklus invariánsok}{5}{subsection.2.2.2}%
+\select@language {english} \contentsline {section}{\numberline {2.3}Hibaüzenetek és diagnosztika}{5}{section.2.3}%
+\select@language {english} \contentsline {chapter}{\numberline {3}Megoldási terv (Rendszerterv)}{6}{chapter.3}%
+\select@language {english} \contentsline {section}{\numberline {3.1}Architektúra és Adatfolyam}{6}{section.3.1}%
+\select@language {english} \contentsline {section}{\numberline {3.2}Az Absztrakt Szintaxisfa (AST) szerkezete}{6}{section.3.2}%
+\select@language {english} \contentsline {section}{\numberline {3.3}Memóriamodell és Állapotkezelés}{7}{section.3.3}%
+\select@language {english} \contentsline {chapter}{\numberline {4}Megvalósítás}{8}{chapter.4}%
+\select@language {english} \contentsline {section}{\numberline {4.1}A Szintaktikai Elemző (Parser) Implementációja}{8}{section.4.1}%
+\select@language {english} \contentsline {section}{\numberline {4.2}A Szimbolikus Végrehajtó Motor (\texttt {symExec})}{9}{section.4.2}%
+\select@language {english} \contentsline {section}{\numberline {4.3}Biztonsági Ellenőrzések (Safety Extraction)}{9}{section.4.3}%
+\select@language {english} \contentsline {section}{\numberline {4.4}Z3 Integráció és a \texttt {proveZ3} függvény}{9}{section.4.4}%
+\select@language {english} \contentsline {chapter}{\numberline {5}Tesztelés}{10}{chapter.5}%
+\select@language {english} \contentsline {section}{\numberline {5.1}Parser Modultesztek}{10}{section.5.1}%
+\select@language {english} \contentsline {section}{\numberline {5.2}Analizátor és Z3 Tesztesetek}{10}{section.5.2}%
+\select@language {english} \contentsline {subsection}{\numberline {5.2.1}Implicit utófeltételek felfedezése}{10}{subsection.5.2.1}%
+\select@language {english} \contentsline {subsection}{\numberline {5.2.2}Tömb határellenőrzések (Array Bounds Checking)}{11}{subsection.5.2.2}%
+\select@language {english} \contentsline {subsection}{\numberline {5.2.3}Ciklusok feloldása (Bounded Model Checking)}{11}{subsection.5.2.3}%
+\select@language {english} \contentsline {chapter}{\numberline {6}Összegzés és Értékelés}{12}{chapter.6}%
+\select@language {english} \contentsline {section}{\numberline {6.1}Szoftver futtatása és Robusztusság}{12}{section.6.1}%
+\select@language {english} \contentsline {section}{\numberline {6.2}További fejlesztési lehetőségek}{12}{section.6.2}%
