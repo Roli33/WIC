@@ -60,7 +60,8 @@ executable WIC
 
     -- Modules included in this executable, other than Main.
     other-modules:    Parser,
-                      Analyzer
+                      Analyzer,
+                      Transpiler
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:
@@ -88,7 +89,8 @@ test-suite wic-tests
     main-is:          ParserTest.hs
     -- Tells the test suite to also compile your Parser module
     other-modules:    Parser,
-                      Analyzer
+                      Analyzer,
+                      Transpiler
     
     -- Look in BOTH folders so it can find ParserTest.hs and Parser.hs
     hs-source-dirs:   test, exe
@@ -101,6 +103,7 @@ test-suite wic-tests
                       hspec,
                       mtl,
                       containers,
+                      directory,
                       z3
 
     default-language: GHC2024

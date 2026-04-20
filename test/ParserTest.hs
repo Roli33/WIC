@@ -5,6 +5,7 @@ import Text.Megaparsec
 import Parser
 import Analyzer
 
+
 -- ============================================================================
 -- AST POSITION STRIPPING UTILITIES (For clean structural testing)
 -- ============================================================================
@@ -360,7 +361,7 @@ spec = do
                     , "}"
                     ]
             errors <- runAnalyzer (parseOk' input)
-            errors `shouldBe` ["test-input:5:5 - Precondition Failed in: divide: y > 0"]
+            errors `shouldBe` (["test-input:5:5 - Precondition Failed in: divide: y > 0"],[])
 
         it "satisfies preconditions using postconditions of other functions" $ do
             let input = unlines
@@ -373,7 +374,7 @@ spec = do
                     , "}"
                     ]
             errors <- runAnalyzer (parseOk' input)
-            errors `shouldBe` []
+            errors `shouldBe` ([],[])
 
     describe "Compile-Time Symbolic Analyzer" $ do
         
@@ -389,7 +390,7 @@ spec = do
                     , "}"
                     ]
             errors <- runAnalyzer (parseOk' input)
-            errors `shouldBe` []
+            errors `shouldBe` ([],[])
 
         it "proves inequalities using heuristics (x > 10 implies x > 5)" $ do
             let input = unlines
@@ -402,7 +403,7 @@ spec = do
                     , "}"
                     ]
             errors <- runAnalyzer (parseOk' input)
-            errors `shouldBe` []
+            errors `shouldBe` ([],[])
 
         it "flags unprovable constraints" $ do
             let input = unlines
@@ -414,8 +415,9 @@ spec = do
                     , "    return 0;"
                     , "}"
                     ]
-            errors <- runAnalyzer (parseOk' input)
+            (errors, unknowns) <- runAnalyzer (parseOk' input)
             errors `shouldBe` ["test-input:5:5 - Precondition Failed in: process: num > 5"]
+            unknowns `shouldBe` []
 
         it "resolves equations using Equality Substitution" $ do
             let input = unlines
@@ -430,7 +432,7 @@ spec = do
                     , "}"
                     ]
             errors <- runAnalyzer (parseOk' input)
-            errors `shouldBe` []
+            errors `shouldBe` ([],[])
 
         it "spots implicit postconditions via sandbox execution (resolving local variables)" $ do
             let input = unlines
@@ -447,7 +449,7 @@ spec = do
                     , "}"
                     ]
             errors <- runAnalyzer (parseOk' input)
-            errors `shouldBe` []
+            errors `shouldBe` ([],[])
             
         it "spots implicit postconditions via symbolic AST inference" $ do
             let input = unlines
@@ -461,7 +463,7 @@ spec = do
                     , "}"
                     ]
             errors <- runAnalyzer (parseOk' input)
-            errors `shouldBe` []
+            errors `shouldBe` ([],[])
 
         it "resolves Weakest Postconditions across branching if/else paths" $ do
             let input = unlines
@@ -478,7 +480,7 @@ spec = do
                     , "}"
                     ]
             errors <- runAnalyzer (parseOk' input)
-            errors `shouldBe` []
+            errors `shouldBe` ([],[])
 
         it "preserves value if nothing changes" $ do
             let input = unlines
@@ -492,7 +494,7 @@ spec = do
                     , "}"
                     ]
             errors <- runAnalyzer (parseOk' input)
-            errors `shouldBe` []
+            errors `shouldBe` ([],[])
 
         it "deduces updated postconditions from pointer mutations" $ do
             let input = unlines
@@ -506,7 +508,7 @@ spec = do
                     , "}"
                     ]
             errors <- runAnalyzer (parseOk' input)
-            errors `shouldBe` []
+            errors `shouldBe` ([],[])
 
     describe "1. Concrete Evaluation & Basic Preconditions" $ do
         it "passes when concrete variables satisfy preconditions" $ do
@@ -519,7 +521,7 @@ spec = do
                     , "}"
                     ]
             errors <- runAnalyzer (parseOk' input)
-            errors `shouldBe` []
+            errors `shouldBe` ([],[])
 
         it "fails and logs violation when concrete variables fail preconditions" $ do
             let input = unlines
@@ -530,8 +532,9 @@ spec = do
                     , "    return 0;"
                     , "}"
                     ]
-            errors <- runAnalyzer (parseOk' input)
+            (errors, unknowns) <- runAnalyzer (parseOk' input)
             errors `shouldBe` ["test-input:4:5 - Precondition Failed in: requirePositive: x > 0"]
+            unknowns `shouldBe` []
 
     describe "4. Weakest Postconditions & Control Flow" $ do
         it "resolves simple implicit postconditions from pure functions" $ do
@@ -546,7 +549,7 @@ spec = do
                     , "}"
                     ]
             errors <- runAnalyzer (parseOk' input)
-            errors `shouldBe` []
+            errors `shouldBe` ([],[])
 
     describe "5. Pointers & Memory Side-Effects" $ do
         it "invalidates concrete and symbolic facts when variables are passed by reference" $ do
@@ -559,8 +562,9 @@ spec = do
                     , "    return 0;"
                     , "}"
                     ]
-            errors <- runAnalyzer (parseOk' input)
-            errors `shouldBe` ["test-input:5:5 - Precondition Failed in: require: x == 10"]
+            (errors, unknowns) <- runAnalyzer (parseOk' input)
+            errors `shouldBe` []
+            map prettyTop unknowns `shouldBe` ["x == 10"]
 
         it "fails if a pointer branch leaves the requirement unprovable" $ do
             let input = unlines
@@ -577,8 +581,9 @@ spec = do
                     , "    return 0;"
                     , "}"
                     ]
-            errors <- runAnalyzer (parseOk' input)
+            (errors, unknowns) <- runAnalyzer (parseOk' input)
             errors `shouldBe` ["test-input:10:5 - Precondition Failed in: require: s == 100"]
+            unknowns `shouldBe` []
 
     describe "7. Advanced Data Structures (Arrays, Structs, Unions, Enums)" $ do
         it "flags violations when struct fields fail postconditions" $ do
@@ -592,8 +597,9 @@ spec = do
                     , "    return 0;"
                     , "}"
                     ]
-            errors <- runAnalyzer (parseOk' input)
-            errors `shouldBe` ["test-input:2:30 - Postcondition Failed in: getPoint: res.x == -5", "test-input:6:5 - Precondition Failed in: requirePositiveX: pt.x > 0"]
+            (errors, unknowns) <- runAnalyzer (parseOk' input)
+            errors `shouldBe` ["test-input:6:5 - Precondition Failed in: requirePositiveX: pt.x > 0"]
+            map prettyTop unknowns `shouldBe` ["res.x == -5"]
 
         it "flags violations on mismatched array logic" $ do
             let input = unlines
@@ -606,8 +612,9 @@ spec = do
                     , "    return 0;"
                     , "}"
                     ]
-            errors <- runAnalyzer (parseOk' input)
-            errors `shouldBe` ["test-input:6:5 - Precondition Failed in: requireMatch: first == buffer[1]"]
+            (errors, unknowns) <- runAnalyzer (parseOk' input)
+            errors `shouldBe` []
+            map prettyTop unknowns `shouldBe` ["first == buffer[1]"]
 
         it "parses enums globally and tracks state" $ do
             let input = unlines
@@ -621,7 +628,7 @@ spec = do
                     , "}"
                     ]
             errors <- runAnalyzer (parseOk' input)
-            errors `shouldBe` []
+            errors `shouldBe` ([],[])
 
     describe "8. Formal Loop Induction" $ do
         it "catches a failing Inductive Step (invariant doesn't hold after body)" $ do
@@ -635,8 +642,9 @@ spec = do
                     , "}"
                     , "Int main() { test(); return 0; }"
                     ]
-            errors <- runAnalyzer (parseOk' input)
+            (errors, unknowns) <- runAnalyzer (parseOk' input)
             errors `shouldBe` ["test-input:3:5 - Loop Inductive Step Failed: i == 0"]
+            unknowns `shouldBe` []
 
     describe "Type-Aware SMT (Reals and Booleans)" $ do
         it "proves exact floating-point / real arithmetic without integer truncation" $ do
@@ -650,7 +658,7 @@ spec = do
                     , "}"
                     ]
             errors <- runAnalyzer (parseOk' input)
-            errors `shouldBe` []
+            errors `shouldBe` ([],[])
 
     describe "Safety Extraction (Div-by-Zero & Array Bounds)" $ do
         it "catches potential division by zero at compile time" $ do
@@ -662,8 +670,9 @@ spec = do
                     , "    return 0;"
                     , "}"
                     ]
-            errors <- runAnalyzer (parseOk' input)
-            errors `shouldBe` ["test-input:1:35 - Division by Zero: b != 0"]
+            (errors, unknowns) <- runAnalyzer (parseOk' input)
+            errors `shouldBe` []
+            map prettyTop unknowns `shouldBe` ["b != 0"]
 
         it "catches array out-of-bounds writes using Z3 bounds checking" $ do
             let input = unlines
@@ -673,8 +682,9 @@ spec = do
                     , "    return 0;"
                     , "}"
                     ]
-            errors <- runAnalyzer (parseOk' input)
+            (errors, unknowns) <- runAnalyzer (parseOk' input)
             errors `shouldBe` ["test-input:3:8 - Array Index Out of Bounds: 10 < 5"]
+            unknowns `shouldBe` []
 
         it "proves an array access is safe based on conditional logic" $ do
             let input = unlines
@@ -687,7 +697,7 @@ spec = do
                     , "Int main() { return 0; }"
                     ]
             errors <- runAnalyzer (parseOk' input)
-            errors `shouldBe` [] 
+            errors `shouldBe` ([],[])
 
     describe "Uninterpreted Functions (Determinism & Opaqueness)" $ do
         it "functions aren't necessarily pure" $ do
@@ -700,8 +710,9 @@ spec = do
                     , "    return 0;"
                     , "}"
                     ]
-            errors <- runAnalyzer (parseOk' input)
-            errors `shouldBe` ["test-input:5:5 - Precondition Failed in: requireEq: val1 == val2"]
+            (errors, unknowns) <- runAnalyzer (parseOk' input)
+            errors `shouldBe` []
+            map prettyTop unknowns `shouldBe` ["val1 == val2"]
 
         it "functions aren't necessarily pure v2" $ do
             let input = unlines
@@ -713,8 +724,9 @@ spec = do
                     , "    return 0;"
                     , "}"
                     ]
-            errors <- runAnalyzer (parseOk' input)
-            errors `shouldBe` ["test-input:5:5 - Precondition Failed in: requireEq: val1 != val2"]
+            (errors, unknowns) <- runAnalyzer (parseOk' input)
+            errors `shouldBe` []
+            map prettyTop unknowns `shouldBe` ["val1 != val2"]
 
         it "fails if opaque functions are called with different inputs" $ do
             let input = unlines
@@ -727,8 +739,9 @@ spec = do
                     , "    return 0;"
                     , "}"
                     ]
-            errors <- runAnalyzer (parseOk' input)
-            errors `shouldBe` ["test-input:6:5 - Precondition Failed in: requireEq: val1 == val2"]
+            (errors, unknowns) <- runAnalyzer (parseOk' input)
+            errors `shouldBe` []
+            map prettyTop unknowns `shouldBe` ["val1 == val2"]
 
     describe "Z3 Theory of Arrays (Pointer/Memory Aliasing)" $ do
         it "proves memory writes don't overlap if indices are distinct" $ do
@@ -745,7 +758,7 @@ spec = do
                     , "}"
                     ]
             errors <- runAnalyzer (parseOk' input)
-            errors `shouldBe` []
+            errors `shouldBe` ([],[])
 
     describe "Bounded Model Checking (BMC for Unannotated Loops)" $ do
         it "automatically unrolls and proves loops without requiring user invariants" $ do
@@ -761,7 +774,7 @@ spec = do
                     , "}"
                     ]
             errors <- runAnalyzer (parseOk' input)
-            errors `shouldBe` []
+            errors `shouldBe` ([],[])
 
         it "catches unrolled loop bounds failures" $ do
             let input = unlines
@@ -773,8 +786,9 @@ spec = do
                     , "    return 0;"
                     , "}"
                     ]
-            errors <- runAnalyzer (parseOk' input)
+            (errors, unknowns) <- runAnalyzer (parseOk' input)
             errors `shouldBe` ["test-input:5:5 - Precondition Failed in: requireMatch: i == 10"]
+            unknowns `shouldBe` []
         
         it "projects inequality bounds from path conditions onto the return value" $ do
             let input = unlines
@@ -795,7 +809,7 @@ spec = do
                     , "}"
                     ]
             errors <- runAnalyzer (parseOk' input)
-            errors `shouldBe` [] 
+            errors `shouldBe` ([],[])
 
         it "projects inequality bounds from path conditions onto the return value" $ do
             let input = unlines
@@ -819,7 +833,7 @@ spec = do
                     , "}"
                     ]
             errors <- runAnalyzer (parseOk' input)
-            errors `shouldBe` [] 
+            errors `shouldBe` ([],[])
 
     describe "Sandbox Memory Management & Local Aliasing" $ do
         
@@ -839,7 +853,7 @@ spec = do
                     , "}"
                     ]
             errors <- runAnalyzer (parseOk' input)
-            errors `shouldBe` []
+            errors `shouldBe` ([],[])
 
         it "evaluates independent path conditions without memory collisions between multiple params and locals" $ do
             let input = unlines
@@ -861,7 +875,7 @@ spec = do
                     , "}"
                     ]
             errors <- runAnalyzer (parseOk' input)
-            errors `shouldBe` []
+            errors `shouldBe` ([],[])
 
         it "preserves parameter values when local variables are declared inside branches" $ do
             let input = unlines
@@ -885,7 +899,7 @@ spec = do
                     , "}"
                     ]
             errors <- runAnalyzer (parseOk' input)
-            errors `shouldBe` []
+            errors `shouldBe` ([],[])
             
         it "safely handles shadowing of variables in inner blocks without destroying parameter bounds" $ do
             let input = unlines
@@ -906,4 +920,42 @@ spec = do
                     , "}"
                     ]
             errors <- runAnalyzer (parseOk' input)
+            errors `shouldBe` ([],[])
+
+    describe "10. Unresolved Constraints & Runtime Asserts (Unknowns)" $ do
+        
+        it "captures unprovable properties as unknowns rather than fatal compile errors" $ do
+            let input = unlines
+                    [ "Void requiresMagic(Int x, Int y, Int z)(x*x*x + y*y*y != z*z*z) { return; }"
+                    , "Int main() {"
+                    , "    Int a = readSensor();"
+                    , "    Int b = readSensor();"
+                    , "    Int c = readSensor();"
+                    , "    requiresMagic(a, b, c);" 
+                    , "    return 0;"
+                    , "}"
+                    ]
+            
+            -- Non-linear integer arithmetic (like Fermat's Last Theorem above) 
+            -- is notoriously undecidable for SMT solvers, forcing Z3 to return Undef (Unknown).
+            (errors, unknowns) <- runAnalyzer (parseOk' input)
+            
             errors `shouldBe` []
+            
+            -- Extract the mathematical expression that was deferred to runtime
+            map prettyTop unknowns `shouldBe` ["(((a * a) * a) + ((b * b) * b)) != ((c * c) * c)"]
+
+
+        it "aborts compilation for PROVABLY false constraints, keeping unknowns empty" $ do
+            let input = unlines
+                    [ "Void requirePositive(Int val)(val > 0) { return; }"
+                    , "Int main() {"
+                    , "    Int x = -5;"
+                    , "    requirePositive(x);"
+                    , "    return 0;"
+                    , "}"
+                    ]
+            (errors, unknowns) <- runAnalyzer (parseOk' input)
+            
+            unknowns `shouldBe` [] -- Nothing is deferred to runtime
+            errors `shouldBe` ["test-input:4:5 - Precondition Failed in: requirePositive: x > 0"]

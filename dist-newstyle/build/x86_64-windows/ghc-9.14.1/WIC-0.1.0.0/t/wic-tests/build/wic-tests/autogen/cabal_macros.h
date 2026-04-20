@@ -30,6 +30,16 @@
   (major1) == 0 && (major2) <  8 || \
   (major1) == 0 && (major2) == 8 && (minor) <= 0)
 #endif /* MIN_VERSION_containers */
+/* package directory-1.3.10.0 */
+#ifndef VERSION_directory
+#define VERSION_directory "1.3.10.0"
+#endif /* VERSION_directory */
+#ifndef MIN_VERSION_directory
+#define MIN_VERSION_directory(major1,major2,minor) (\
+  (major1) <  1 || \
+  (major1) == 1 && (major2) <  3 || \
+  (major1) == 1 && (major2) == 3 && (minor) <= 10)
+#endif /* MIN_VERSION_directory */
 /* package hspec-2.11.17 */
 #ifndef VERSION_hspec
 #define VERSION_hspec "2.11.17"

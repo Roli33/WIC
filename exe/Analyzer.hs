@@ -10,10 +10,6 @@ to mathematically prove the absence of safety violations (like division by zero,
 array out-of-bounds) and contract breaches.
 -}
 
--- if we pass const cptr we don't have to invalidate
--- for invar -> while
--- seperate errors from unkowns
--- break continue logic
 module Analyzer where
 
 import Parser
@@ -57,8 +53,12 @@ data FuncSummary = FuncSummary
     , implicitPosts  :: [Expr]   -- ^ Derived logical facts about the return value ('res')
     } deriving (Show, Eq)
 
--- Add this to AnalyzerState:
--- 
+-- | The three possible states of an SMT proof.
+data ProveResult 
+    = ProvenTrue    -- ^ Mathematically guaranteed to always be true.
+    | ProvablyFalse -- ^ Mathematically guaranteed to NEVER be true (Fatal Error).
+    | RuntimeCheck  -- ^ Depends on runtime variables or is too complex (Inject Assert).
+    deriving (Show, Eq)
 
 data AnalyzerState = AnalyzerState
     { env        :: SymEnv                        -- ^ Current variable scope mapping
@@ -69,7 +69,8 @@ data AnalyzerState = AnalyzerState
     , nextAddr   :: Addr                          -- ^ Pointer for the next memory allocation
     , facts      :: [Expr]                        -- ^ Accumulated logical facts (Path Conditions)
     , funcs      :: M.Map String Function         -- ^ Global function definitions
-    , violations :: [(SourcePos, String, Expr)]   -- ^ Collected contract/safety failures
+    , violations :: [(SourcePos, String, Expr)]   -- ^ Collected Provably False failures (Z3 Sat)
+    , unknowns   :: [(SourcePos, String, Expr)]   -- ^ Collected Unprovable failures (Z3 Undef)
     , returnVal  :: Maybe Value                   -- ^ Holds the return value during block evaluation
     , summaries  :: M.Map String FuncSummary
     } deriving (Show)
@@ -352,10 +353,9 @@ simplifyBool inExpr@(Expr pos node) = case node of
     UnOp "!" (Expr _ (BoolLit False))  -> Expr pos (BoolLit True)
     _ -> inExpr
 
--- | Partially evaluates an expression, simplifying nodes where concrete values are known.
 partialEval :: Layout -> Heap -> Expr -> Expr
 partialEval l heap expr@(Expr pos node) = case node of
-    Var _handleCallback -> toLit expr
+    Var _               -> toLit expr
     Field e p           -> case toLit expr of Expr _ (Field _ _) -> Expr pos (Field (partialEval l heap e) p); lit -> lit
     Index e1 e2         -> case toLit expr of Expr _ (Index _ _) -> Expr pos (Index (partialEval l heap e1) (partialEval l heap e2)); lit -> lit
     Deref e             -> case toLit expr of Expr _ (Deref _)   -> Expr pos (Deref (partialEval l heap e)); lit -> lit
@@ -509,23 +509,40 @@ translateZ3 l funcs (Expr _ node) = case node of
                 z3Args <- mapM (translateZ3 l funcs) args
                 mkApp funcDecl z3Args
 
-    _ -> mkStringSymbol (show node) >>= mkIntVar 
+    _ -> mkStringSymbol (prettyTop (genExpr node)) >>= mkIntVar
 
 -- | Proves if a given condition logically follows from a set of known facts using Z3.
-proveZ3 :: Layout -> FuncEnv -> [Expr] -> Expr -> IO Value
-proveZ3 l funcs facts condition = evalZ3 $ do
-    z3Facts <- mapM (translateZ3 l funcs) facts
-    z3Cond  <- translateZ3 l funcs condition
-    mapM_ assert z3Facts
-    
-    -- We prove the condition by asserting its negation and looking for a contradiction (Unsat)
-    notCond <- mkNot z3Cond
-    assert notCond
-    res <- check
-    case res of
-        Unsat -> return (VBool True)  -- Negation is impossible; condition is proven TRUE
-        Sat   -> return (VBool False) -- Found a model where condition is false
-        Undef -> return VUnknown      -- SMT solver timed out or gave up
+proveZ3 :: Layout -> FuncEnv -> [Expr] -> Expr -> IO ProveResult
+proveZ3 l funcs facts condition = do
+    -- Question 1: Can the condition ever FAIL?
+    canFail <- evalZ3 $ do
+        z3Facts <- mapM (translateZ3 l funcs) facts
+        z3Cond  <- translateZ3 l funcs condition
+        mapM_ assert z3Facts
+        
+        -- Assert the NEGATION of the condition
+        notCond <- mkNot z3Cond
+        assert notCond
+        check 
+        
+    case canFail of
+        Unsat -> return ProvenTrue -- It can never fail. It is ALWAYS TRUE.
+        Undef -> return RuntimeCheck -- Math is too hard for Z3. Defer to runtime.
+        Sat   -> do
+            -- Question 2: The condition CAN fail. But can it ever SUCCEED?
+            canSucceed <- evalZ3 $ do
+                z3Facts <- mapM (translateZ3 l funcs) facts
+                z3Cond  <- translateZ3 l funcs condition
+                mapM_ assert z3Facts
+                
+                -- Assert the condition ITSELF
+                assert z3Cond
+                check
+                
+            case canSucceed of
+                Unsat -> return ProvablyFalse -- It can never succeed. It is ALWAYS FALSE.
+                Sat   -> return RuntimeCheck  -- It can fail AND it can succeed. Depends on runtime data.
+                Undef -> return RuntimeCheck  -- Z3 gave up.
 
 
 -- ============================================================================
@@ -533,9 +550,9 @@ proveZ3 l funcs facts condition = evalZ3 $ do
 -- ============================================================================
 
 -- | Evaluates an expression, checking preconditions if a function call is encountered.
-evalExpr :: Expr -> Analyzer Value
-evalExpr e@(Expr callPos node) = do
-    l         <- getLayout
+-- | Evaluates an expression, checking preconditions if a function call is encountered.
+evalExpr :: Layout -> SymStore -> Expr -> Analyzer Value
+evalExpr l store e@(Expr callPos node) = do
     currHeap  <- gets heap
     currFacts <- gets facts
     currFuncs <- gets funcs
@@ -546,7 +563,11 @@ evalExpr e@(Expr callPos node) = do
                 Nothing -> return VUnknown
                 Just funcDef -> do
                     let paramNames = map (\(Arg _ n) -> n) (funcArgs funcDef)
-                    let subs = zip (map (genExpr . Var) paramNames) argExprs
+                    -- Critically, we must evaluate the arguments against the STORE
+                    -- before substituting them into the invariant.
+                    let evalArgs = map (symEval l currHeap store) argExprs 
+                    let subs = zip (map (genExpr . Var) paramNames) evalArgs
+                    
                     case funcInvars funcDef of
                         Nothing     -> return ()
                         Just invars -> forM_ (concatMap splitAnds invars) $ \inv -> do
@@ -555,16 +576,18 @@ evalExpr e@(Expr callPos node) = do
                             let evalFacts      = map (partialEval l currHeap) currFacts
                             
                             isProven <- liftIO $ proveZ3 l currFuncs evalFacts evalInv
-                            when (isProven == VBool False || isProven == VUnknown) $ 
-                                modify (\s -> s { violations = ((callPos, "Precondition Failed in: " ++ fname, callerScopeInv) : violations s) })
+                            case isProven of
+                                ProvablyFalse -> modify (\s -> s { violations = ((callPos, "Precondition Failed in: " ++ fname, callerScopeInv) : violations s) })
+                                RuntimeCheck  -> modify (\s -> s { unknowns   = ((callPos, "Precondition requires runtime check: " ++ fname, callerScopeInv) : unknowns s) })
+                                ProvenTrue    -> return ()
                     return VUnknown
-        BinOp op e1 e2 -> applyOp op <$> evalExpr e1 <*> evalExpr e2
-        UnOp op ex     -> applyUnOp op <$> evalExpr ex
+        BinOp op e1 e2 -> applyOp op <$> evalExpr l store e1 <*> evalExpr l store e2
+        UnOp op ex     -> applyUnOp op <$> evalExpr l store ex
         Ternary c t ex -> do
-            condVal <- evalExpr c
+            condVal <- evalExpr l store c
             case condVal of 
-                VBool True  -> evalExpr t
-                VBool False -> evalExpr ex
+                VBool True  -> evalExpr l store t
+                VBool False -> evalExpr l store ex
                 _           -> return VUnknown
         _ -> return $ evalPure l currHeap e
 
@@ -848,7 +871,7 @@ registerCallFacts mAssignedVar fname argExprs = do
             let explicitPost = fromMaybe [] (funcPostconds funcDef)
 
             let mutatedArgs = [ argExprs !! i | (i, name) <- zip [0..] paramNames, name `elem` modifiedParams summary ]
-            argVals <- mapM evalExpr mutatedArgs
+            argVals <- mapM (evalExpr callerLayout M.empty) mutatedArgs
             let footprint = getFootprint callerLayout callerHeap argVals
             
             let mutatedCallerVars = [ name | (name, baseAddr) <- M.toList (lEnv callerLayout), Just ty <- [M.lookup baseAddr (lTypes callerLayout)], let sz = sizeOf callerLayout ty, any (\addr -> addr >= baseAddr && addr < baseAddr + sz) footprint ]
@@ -870,7 +893,7 @@ registerCallFacts mAssignedVar fname argExprs = do
             modify (\s -> s { facts = facts s ++ evaluatedFinalFacts })
             
         Nothing -> do
-            argVals <- mapM evalExpr argExprs
+            argVals <- mapM (evalExpr callerLayout M.empty) argExprs
             let footprint = getFootprint callerLayout callerHeap argVals
             let mutatedCallerVars = [ name | (name, baseAddr) <- M.toList (lEnv callerLayout), Just ty <- [M.lookup baseAddr (lTypes callerLayout)], let sz = sizeOf callerLayout ty, any (\addr -> addr >= baseAddr && addr < baseAddr + sz) footprint ]
             
@@ -889,13 +912,14 @@ analyzeStmt stmt@(Stmt pos stmtNode) = do
         Just _ -> return () 
         Nothing -> case stmtNode of
             Decl _ ty name mExpr -> do
-                val <- case mExpr of Just expr -> evalExpr expr; Nothing -> return VUnknown
+                l <- getLayout
+                val <- case mExpr of Just expr -> evalExpr l M.empty expr; Nothing -> return VUnknown
                 _ <- alloc name ty val 
                 case mExpr of Just (Expr _ (Call fname args)) -> registerCallFacts (Just (genExpr (Var name))) fname args; _ -> return ()
             
             Assign lhs expr -> do
-                val <- evalExpr expr
                 l <- getLayout
+                val <- evalExpr l M.empty expr
                 h <- gets heap
                 case lvalue l h lhs of
                     Just addr -> modify (\s -> s { heap = M.insert addr val (heap s) })
@@ -903,7 +927,8 @@ analyzeStmt stmt@(Stmt pos stmtNode) = do
                 case expr of Expr _ (Call fname args) -> registerCallFacts (Just lhs) fname args; _ -> return ()
             
             ExprStmt callExpr@(Expr _ (Call fname args)) -> do
-                _ <- evalExpr callExpr
+                l <- getLayout
+                _ <- evalExpr l M.empty callExpr
                 registerCallFacts Nothing fname args
                 
             ExprStmt (Expr _ (PreInc lhs))  -> mutateHeap lhs (+ 1)
@@ -913,7 +938,8 @@ analyzeStmt stmt@(Stmt pos stmtNode) = do
             
             Block stmts -> mapM_ analyzeStmt stmts
             If cond thn els -> do
-                condVal <- evalExpr cond
+                l <- getLayout
+                condVal <- evalExpr l M.empty cond
                 case condVal of 
                     VBool True  -> mapM_ analyzeStmt thn
                     VBool False -> maybe (return ()) (mapM_ analyzeStmt) els
@@ -929,8 +955,10 @@ analyzeStmt stmt@(Stmt pos stmtNode) = do
                     let evalInv = partialEval l currHeap (symEval l currHeap M.empty inv)
                     let evalFacts = map (partialEval l currHeap) currFacts
                     isProven <- liftIO $ proveZ3 l currFuncs evalFacts evalInv
-                    when (isProven == VBool False || isProven == VUnknown) $
-                        modify (\s -> s { violations = ((pos, "Loop Base Case Failed", inv) : violations s) })
+                    case isProven of
+                        ProvablyFalse -> modify (\s -> s { violations = ((pos, "Loop Base Case Failed", inv) : violations s) })
+                        RuntimeCheck  -> modify (\s -> s { unknowns   = ((pos, "Loop Base Case Unprovable", inv) : unknowns s) })
+                        ProvenTrue    -> return ()
                         
                 nxtA <- gets nextAddr
                 let (_, dummyConts, _) = symExec 100 currFuncs l nxtA currHeap M.empty (genExpr (BoolLit True)) body
@@ -949,8 +977,10 @@ analyzeStmt stmt@(Stmt pos stmtNode) = do
                         let evalInv = partialEval l currHeap endInv
                         let evalFacts = map (partialEval l currHeap) (currFacts ++ invars ++ splitAnds pathPc)
                         isProven <- liftIO $ proveZ3 l currFuncs evalFacts evalInv
-                        when (isProven == VBool False || isProven == VUnknown) $
-                            modify (\s -> s { violations = ((pos, "Loop Inductive Step Failed", inv) : violations s) })
+                        case isProven of
+                            ProvablyFalse -> modify (\s -> s { violations = ((pos, "Loop Inductive Step Failed", inv) : violations s) })
+                            RuntimeCheck  -> modify (\s -> s { unknowns   = ((pos, "Loop Inductive Step Unprovable", inv) : unknowns s) })
+                            ProvenTrue    -> return ()
                             
                 modify (\s -> s { facts = facts s ++ invars ++ [genExpr (UnOp "!" cond)] })
                 forM_ mutatedAddrs $ \addr -> do
@@ -961,9 +991,10 @@ analyzeStmt stmt@(Stmt pos stmtNode) = do
                     unrolledStmts = foldr (\_ acc -> [Stmt pos (If cond (body ++ acc) Nothing)]) [] [1..unrollLimit]
                 mapM_ analyzeStmt unrolledStmts
 
-            Return mExpr -> do 
+            Return mExpr -> do
+                l <- getLayout 
                 case mExpr of 
-                    Just expr -> do val <- evalExpr expr; modify (\s -> s { returnVal = Just val })
+                    Just expr -> do val <- evalExpr l M.empty expr; modify (\s -> s { returnVal = Just val })
                     Nothing   -> modify (\s -> s { returnVal = Just VUnknown })
             _ -> return ()
 
@@ -1017,7 +1048,7 @@ prettyExpr (Expr _ node) = case node of
 
 -- | Main execution function for the analyzer. Takes the AST, registers global definitions,
 -- and iterates through each function to verify its body against its contracts.
-runAnalyzer :: [TopLevel] -> IO [String]
+runAnalyzer :: [TopLevel] -> IO ([String], [Expr])  -- <-- CHANGED RETURN TYPE
 runAnalyzer ast = 
     let 
         funcDefs   = M.fromList [ (funcName f, f) | DefFunc f <- ast ]
@@ -1025,7 +1056,7 @@ runAnalyzer ast =
         structDefs = M.fromList [ (name, fields) | DefStruct name fields <- ast ]
         unionDefs  = M.fromList [ (name, fields) | DefUnion name fields <- ast ]
         
-        initialState = AnalyzerState M.empty M.empty M.empty structDefs unionDefs 1 [] funcDefs [] Nothing (M.fromList [])
+        initialState = AnalyzerState M.empty M.empty M.empty structDefs unionDefs 1 [] funcDefs [] [] Nothing (M.fromList [])
         
         formatViolation :: (SourcePos, String, Expr) -> String
         formatViolation (pos, msg, expr) = 
@@ -1036,13 +1067,13 @@ runAnalyzer ast =
 
         setupGlobals = forM_ globalDefs $ \g -> case g of
             DefGlobal _ ty name mExpr -> do
-                val <- case mExpr of Just expr -> evalExpr expr; Nothing -> return VUnknown
+                l <- getLayout
+                val <- case mExpr of Just expr -> evalExpr l M.empty expr; Nothing -> return VUnknown
                 _ <- alloc name ty val
                 return ()
             _ -> return ()
             
         verifyFunc funcDef = do
-            -- Optimization: Skip verifying functions that don't compute/mutate anything (axioms)
             let isAxiom = not (any hasComputation (funcBody funcDef))
                   where
                     hasComputation (Stmt _ (Assign _ _))         = True
@@ -1070,28 +1101,25 @@ runAnalyzer ast =
                 let localTypesMap = M.fromList (zip [startAddr..] paramTypes) `M.union` globalTypes
                 let startFacts    = concatMap splitAnds (fromMaybe [] (funcInvars funcDef))
                 
-                -- Initialize isolated function scope
                 modify (\s -> s { env = localEnv, heapTypes = localTypesMap, facts = globalFacts ++ startFacts, nextAddr = startAddr + length paramNames, returnVal = Nothing })
                 
-                -- Fast concrete evaluation pass
                 mapM_ analyzeStmt (funcBody funcDef)
                 
                 l <- getLayout
                 
-                -- Deep symbolic execution pass
                 let (returns, continues, safetyObligations) = symExec 10000 currFuncs l (startAddr + length paramNames) globalHeap M.empty (genExpr (BoolLit True)) (funcBody funcDef)
                 
-                -- Prove all extracted safety obligations (like division by zero prevention)
                 forM_ safetyObligations $ \(pathPc, errorPos, errMsg, readableCheck, mathCheck) -> do
                     let evalCheck = partialEval l globalHeap mathCheck
                     let pcSimplified = simplifyBool (partialEval l globalHeap pathPc)
                     if pcSimplified == genExpr (BoolLit False) then return () else do
                         let evalFacts = map (partialEval l globalHeap) (globalFacts ++ startFacts ++ splitAnds pcSimplified)
                         isProven <- liftIO $ proveZ3 l currFuncs evalFacts evalCheck
-                        when (isProven == VBool False || isProven == VUnknown) $
-                            modify (\s -> s { violations = ((errorPos, errMsg, readableCheck) : violations s) })
+                        case isProven of
+                            ProvablyFalse -> modify (\s -> s { violations = ((errorPos, errMsg, readableCheck) : violations s) })
+                            RuntimeCheck  -> modify (\s -> s { unknowns   = ((errorPos, errMsg ++ " (Unprovable)", readableCheck) : unknowns s) })
+                            ProvenTrue    -> return ()
 
-                -- Prove user-defined postconditions
                 let allPaths = returns ++ map (\(_, _, st, p) -> (p, Nothing, st)) continues
                 let posts = fromMaybe [] (funcPostconds funcDef)
                 
@@ -1104,12 +1132,17 @@ runAnalyzer ast =
                         let evalFacts = map (partialEval l globalHeap) (globalFacts ++ startFacts ++ splitAnds pathPc)
                         
                         isProven <- liftIO $ proveZ3 l currFuncs evalFacts evalPostConcrete
-                        when (isProven == VBool False || isProven == VUnknown) $
-                            modify (\s -> s { violations = ((postPos, "Postcondition Failed in: " ++ funcName funcDef, post) : violations s) })
+                        case isProven of
+                            ProvablyFalse -> modify (\s -> s { violations = ((postPos, "Postcondition Failed in: " ++ funcName funcDef, post) : violations s) })
+                            RuntimeCheck  -> modify (\s -> s { unknowns   = ((postPos, "Postcondition Unprovable in: " ++ funcName funcDef, post) : unknowns s) })
+                            ProvenTrue    -> return ()
                             
-                -- Restore global state before verifying the next function
                 modify (\s -> s { env = globalEnv, heap = globalHeap, heapTypes = globalTypes, facts = globalFacts, nextAddr = globalNextA, returnVal = Nothing })
 
     in do
         finalState <- execStateT (setupGlobals >> buildSummaries >> mapM_ verifyFunc (M.elems funcDefs)) initialState
-        return $ map formatViolation (reverse $ violations finalState)
+        
+        let formattedViolations = map formatViolation (reverse $ violations finalState)
+        let unknownExprs        = map (\(_, _, e) -> e) (reverse $ unknowns finalState) -- Extract raw AST expressions
+        
+        return (formattedViolations, unknownExprs)

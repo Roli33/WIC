@@ -1,4 +1,4 @@
-Int main(Int n, Real x, Real y, Bool option)(x > n, f(x) > y, x * n == y)(dif > -9999)
+Int main(Int n, Double x, Double y, Bool option)(x > n, f(x) > y, x * n == y)(dif > -9999)
 {
     // this is a comment
     Double dif = x - y;
