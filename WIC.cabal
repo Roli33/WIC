@@ -86,7 +86,7 @@ test-suite wic-tests
     type:             exitcode-stdio-1.0
     
     -- Points to your specific test file
-    main-is:          ParserTest.hs
+    main-is:          Test.hs
     -- Tells the test suite to also compile your Parser module
     other-modules:    Parser,
                       Analyzer,

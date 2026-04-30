@@ -1143,6 +1143,6 @@ runAnalyzer ast =
         finalState <- execStateT (setupGlobals >> buildSummaries >> mapM_ verifyFunc (M.elems funcDefs)) initialState
         
         let formattedViolations = map formatViolation (reverse $ violations finalState)
-        let unknownExprs        = map (\(_, _, e) -> e) (reverse $ unknowns finalState) -- Extract raw AST expressions
+        let unknownExprs        = map (\(_, _, e) -> e) (reverse $ unknowns finalState)
         
         return (formattedViolations, unknownExprs)
